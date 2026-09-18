@@ -1,1 +1,53 @@
+# syntax=docker/dockerfile:1
 
+ARG RUST_VERSION=1.96.0
+ARG RUSTFLAGS="-C link-arg=-fuse-ld=lld"
+
+FROM public.ecr.aws/docker/library/rust:${RUST_VERSION}-trixie AS builder
+
+ARG RUSTFLAGS
+WORKDIR /app
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      git \
+      libclang-dev \
+      libssl-dev \
+      pkg-config \
+      curl \
+      build-essential \
+      cmake \
+      lld \
+      protobuf-compiler \
+      libprotobuf-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV RUSTFLAGS=${RUSTFLAGS}
+ENV CARGO_INCREMENTAL=0
+
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY actions ./actions
+COPY bin ./bin
+COPY crates ./crates
+COPY etc/tools ./etc/tools
+COPY etc/systems ./etc/systems
+
+RUN cargo build --release \
+    --package base-prover-service-bin \
+    --bin base-prover-service
+
+FROM public.ecr.aws/docker/library/debian:trixie-slim AS runtime
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=builder /app/target/release/base-prover-service ./base-prover-service
+
+EXPOSE 9000 9001
+
+ENTRYPOINT ["./base-prover-service"]
